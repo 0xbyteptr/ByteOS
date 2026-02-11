@@ -18,181 +18,214 @@
 #include "serial/serial.h"
 #include "shell/shell.h"
 
+// ────────────────────────────────────────────────
+// Forward declarations
+// ────────────────────────────────────────────────
 extern void console_init(void);
 extern void gdt_init(void);
 extern void tss_init(void);
 extern void early_idt_init(void);
 extern void idt_init(void);
 
+extern int kernel_spawn_elf_from_path(const char *path);
+
+// ────────────────────────────────────────────────
+// Helper: draw filled rectangle
+// ────────────────────────────────────────────────
 static void draw_rect(uint8_t *fb, uint64_t fb_pitch, uint64_t x, uint64_t y,
                       uint64_t w, uint64_t h, uint32_t color, uint16_t bpp) {
-  if (!fb || bpp == 0)
-    return;
+    if (!fb || bpp == 0 || w == 0 || h == 0) return;
 
-  uint8_t bytes = bpp / 8;
-  for (uint64_t yy = 0; yy < h; ++yy) {
-    uint8_t *line = fb + (y + yy) * fb_pitch + x * bytes;
-    for (uint64_t xx = 0; xx < w; ++xx) {
-      uint8_t *p = line + xx * bytes;
-      if (bytes >= 4) {
-        *((uint32_t *)p) = color;
-      } else if (bytes == 3) {
-        p[0] = (uint8_t)(color & 0xFF);
-        p[1] = (uint8_t)((color >> 8) & 0xFF);
-        p[2] = (uint8_t)((color >> 16) & 0xFF);
-      }
+    uint8_t bytes = bpp / 8;
+    for (uint64_t yy = 0; yy < h; ++yy) {
+        uint8_t *line = fb + (y + yy) * fb_pitch + x * bytes;
+        for (uint64_t xx = 0; xx < w; ++xx) {
+            uint8_t *p = line + xx * bytes;
+            if (bytes >= 4) {
+                *(uint32_t *)p = color;
+            } else if (bytes == 3) {
+                p[0] = (uint8_t)(color);
+                p[1] = (uint8_t)(color >> 8);
+                p[2] = (uint8_t)(color >> 16);
+            }
+        }
     }
-  }
 }
 
-static uint32_t compose_pixel(uint8_t r, uint8_t g, uint8_t b,
-                              struct limine_framebuffer *fb) {
-  if (!fb)
-    return 0;
+// ────────────────────────────────────────────────
+// Simple debug task – prints to serial + tries console
+// ────────────────────────────────────────────────
+static void debug_console_task(void *arg) {
+    (void)arg;
+    serial_puts("debug_console_task: started\n");
 
-  uint32_t out = 0;
-  uint32_t rv = (uint32_t)r >> (8 - fb->red_mask_size);
-  uint32_t gv = (uint32_t)g >> (8 - fb->green_mask_size);
-  uint32_t bv = (uint32_t)b >> (8 - fb->blue_mask_size);
+    for (int i = 0; i < 12; i++) {
+        serial_puts("debug_task: count ");
+        serial_putdec(i);
+        serial_puts(" – ");
 
-  out |= (rv << fb->red_mask_shift);
-  out |= (gv << fb->green_mask_shift);
-  out |= (bv << fb->blue_mask_shift);
+        // Try to also print to graphical console
+        console_puts("debug ");
+        serial_putdec(i);
+        console_puts("\n");
 
-  return out;
+        for (volatile int j = 0; j < 20000000; j++); // rough delay
+        scheduler_yield();
+    }
+
+    serial_puts("debug_console_task: finished\n");
 }
 
+// ────────────────────────────────────────────────
+// Moving window demo task
+// ────────────────────────────────────────────────
 static void mover(void *arg) {
-  serial_puts("mover: start\n");
-  MiaWindow *w = mia_window_create(60, 60, 220, 160, "Mover");
-  if (!w) {
-    serial_puts("mover: mia_window_create returned NULL\n");
-    for (;;)
-      asm volatile("hlt");
-  }
+    serial_puts("mover task: starting\n");
 
-  serial_puts("mover: window created\n");
-  int dir = 1;
-  int x = 60;
-
-  while (1) {
-    serial_puts("mover: tick\n");
-    mia_window_move(w, x, 60);
-
-    uint64_t fb_width = framebuffer_get_width();
-    uint64_t fb_height = framebuffer_get_height();
-    uint64_t clear_height = (fb_height > 48) ? fb_height - 48 : fb_height;
-
-    framebuffer_draw_rect(0, 0, fb_width, clear_height, 0x000088);
-    mia_paint_all();
-
-    x += dir * 4;
-    if (x < 10 || x + mia_get_width(w) > (int)fb_width - 10) {
-      dir = -dir;
+    MiaWindow *w = mia_window_create(80, 80, 240, 180, "Mover");
+    if (!w) {
+        serial_puts("mover: failed to create window\n");
+        for (;;)
+            asm volatile("hlt");
     }
 
-    scheduler_yield();
-  }
+    serial_puts("mover: window created successfully\n");
+
+    int dir = 1;
+    int x = 80;
+
+    while (1) {
+        mia_window_move(w, x, 80);
+
+        uint64_t wdt = framebuffer_get_width();
+        uint64_t hgt = framebuffer_get_height();
+
+        // Clear area below title bar
+        uint64_t clear_h = (hgt > 48) ? hgt - 48 : hgt;
+        framebuffer_draw_rect(0, 48, wdt, clear_h, 0x000088);
+
+        mia_paint_all();
+
+        x += dir * 5;
+        if (x < 20 || x + mia_get_width(w) > (int)wdt - 20) {
+            dir = -dir;
+        }
+
+        scheduler_yield();
+    }
 }
 
-static void looper(void *arg) {
-  int i = 0;
-  while (1) {
-    printf("Loop %d\n", i++);
-    scheduler_yield();
-  }
-}
-
+// ────────────────────────────────────────────────
+// Kernel entry point
+// ────────────────────────────────────────────────
 void kernel_main(void) {
-  volatile unsigned short *vga = (unsigned short *)0xB8000;
-  if (!vga) {
-    serial_puts("kernel: VGA memory not accessible\n");
-    return;
-  }
+    // Very early visual feedback (VGA text mode)
+    volatile uint16_t *vga = (volatile uint16_t *)0xB8000;
+    vga[0] = 'B' | (0x0F << 8);
+    vga[1] = 'Y' | (0x0F << 8);
+    vga[2] = 'T' | (0x0F << 8);
+    vga[3] = 'E' | (0x0F << 8);
 
-  vga[0] = (unsigned short)('B' | (0x0F << 8));
-  vga[1] = (unsigned short)('O' | (0x0F << 8));
-  vga[2] = (unsigned short)('O' | (0x0F << 8));
-  vga[3] = (unsigned short)('T' | (0x0F << 8));
+    serial_init();
+    serial_puts("\n=== ByteOS kernel starting ===\n");
 
-  serial_init();
-  serial_puts("kernel: enter\n");
+    gdt_init();
+    serial_puts("GDT initialized\n");
 
-  gdt_init();
-  serial_puts("kernel: gdt_init returned\n");
+    early_idt_init();
+    serial_puts("Early IDT initialized\n");
 
-  early_idt_init();
-  serial_puts("kernel: early_idt_init returned\n");
+    tss_init();
+    serial_puts("TSS initialized\n");
 
-  tss_init();
-  serial_puts("kernel: tss_init returned\n");
+    idt_init();
+    serial_puts("Full IDT initialized\n");
 
-  idt_init();
-  serial_puts("kernel: idt_init returned\n");
+    asm volatile("sti");    // enable interrupts
+    serial_puts("Interrupts enabled\n");
 
-  asm volatile("sti");
+    drivers_init_all();
+    serial_puts("Drivers initialized\n");
 
-  drivers_init_all();
-
-  if (!framebuffer_init()) {
-    serial_puts(
-        "kernel: framebuffer init failed; continuing without framebuffer\n");
-    vga[0] = (unsigned short)('N' | (0x0F << 8));
-    vga[1] = (unsigned short)('O' | (0x0F << 8));
-    vga[2] = (unsigned short)('F' | (0x0F << 8));
-    vga[3] = (unsigned short)('B' | (0x0F << 8));
-  } else {
-    serial_puts("kernel: framebuffer initialized\n");
-    int psf_ok =
-        psf_init_from_memory(assets_font_psf1, (size_t)assets_font_psf1_len);
-    if (!psf_ok) {
-      serial_puts("kernel: psf_init failed\n");
+    // ── Framebuffer ────────────────────────────────
+    bool fb_ok = framebuffer_init();
+    if (!fb_ok) {
+        serial_puts("WARNING: framebuffer_init failed – no graphical output\n");
+        vga[5] = 'N' | (0x0C << 8);
+        vga[6] = 'O' | (0x0C << 8);
+        vga[7] = 'F' | (0x0C << 8);
+        vga[8] = 'B' | (0x0C << 8);
     } else {
-      serial_puts("kernel: psf_init ok\n");
-      console_init();
+        serial_puts("Framebuffer initialized (");
+        serial_putdec(framebuffer_get_width());
+        serial_puts("x");
+        serial_putdec(framebuffer_get_height());
+        serial_puts(")\n");
+
+        bool font_ok = psf_init_from_memory(assets_font_psf1, assets_font_psf1_len);
+        if (font_ok) {
+            serial_puts("PSF font loaded\n");
+            console_init();
+            serial_puts("Console subsystem ready\n");
+        } else {
+            serial_puts("PSF font loading failed\n");
+        }
     }
-  }
 
-  framebuffer_draw_rect(0, 0, framebuffer_get_width(), framebuffer_get_height(),
-                        0x1E2A38);
-  psf_draw_text(20, 20, "ByteOS", 0xFFFFFF);
+    // Clear screen / draw background
+    if (fb_ok) {
+        framebuffer_draw_rect(0, 0,
+                              framebuffer_get_width(),
+                              framebuffer_get_height(),
+                              0x1E2A38);
+        psf_draw_text(24, 24, "ByteOS", 0xFFFFFF);
+    }
 
-  if (scheduler_init() != 0) {
-    serial_puts("kernel: scheduler init failed\n");
-    panic("Scheduler initialization failed");
-  }
+    // ── Scheduler ──────────────────────────────────
+    if (scheduler_init() != 0) {
+        serial_puts("CRITICAL: scheduler_init failed\n");
+        panic("Cannot continue without scheduler");
+    }
+    serial_puts("Scheduler initialized\n");
 
-  mia_init();
+    // ── GUI (Mia) ──────────────────────────────────
+    mia_init();
+    serial_puts("Mia GUI initialized\n");
 
-  extern void wm_proc(void *);
-  int wm_tid = task_create(wm_proc, NULL);
-  if (wm_tid < 0) {
-    serial_puts("kernel: failed to create wm task\n");
-  }
+    // ── Try to start shell from embedded toybox ────
+    serial_puts("Trying to start /bin/sh (embedded toybox)...\n");
+    int shell_tid = kernel_spawn_elf_from_path("/bin/sh");
+    if (shell_tid >= 0) {
+        serial_puts("Shell task created successfully – TID = ");
+        serial_putdec((uint64_t)shell_tid);
+        serial_puts("\n");
+    } else {
+        serial_puts("!!! Failed to spawn shell – error code = ");
+        serial_putdec((uint64_t)shell_tid);
+        serial_puts(" !!!\n");
+    }
 
-  extern void user_main(void);
-  extern void enter_user_task(void *arg);
-  int uid = task_create((task_fn)enter_user_task, (void *)user_main);
-  if (uid < 0) {
-    serial_puts("kernel: failed to create user task\n");
-  }
+    // ── Debug / demo tasks ─────────────────────────
+    int debug_tid = task_create(debug_console_task, NULL);
+    if (debug_tid >= 0) {
+        serial_puts("Debug console task created – TID = ");
+        serial_putdec((uint64_t)debug_tid);
+        serial_puts("\n");
+    }
 
-  int t1 = task_create(mover, NULL);
-  if (t1 < 0) {
-    serial_puts("kernel: failed to create mover task\n");
-  }
+    int mover_tid = task_create(mover, NULL);
+    if (mover_tid >= 0) {
+        serial_puts("Mover window task created – TID = ");
+        serial_putdec((uint64_t)mover_tid);
+        serial_puts("\n");
+    }
 
-  int t2 = task_create(looper, NULL);
-  if (t2 < 0) {
-    serial_puts("kernel: failed to create looper task\n");
-  }
+    serial_puts("All initial tasks created – entering scheduler\n");
+    serial_puts("===========================================\n");
 
-  int ts = task_create(shell_proc, NULL);
-  if (ts < 0) {
-    serial_puts("kernel: failed to create shell task\n");
-  }
+    // Hand over control to the scheduler
+    scheduler_run();
 
-  serial_puts("kernel: demo tasks created\n");
-  serial_puts("kernel: starting scheduler\n");
-  scheduler_run();
+    // Should never reach here
+    panic("scheduler_run() returned");
 }

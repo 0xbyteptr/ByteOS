@@ -9,6 +9,9 @@
 #include <stdint.h>
 #include <string.h>
 
+/* declare kernel helper to spawn ELF by path */
+extern int kernel_spawn_elf_from_path(const char *path);
+
 void shell_proc(void *arg) {
   (void)arg;
   serial_puts("shell: start\n");
@@ -76,6 +79,12 @@ void shell_proc(void *arg) {
       } else if (strcmp(line, "clear") == 0) {
         framebuffer_draw_rect(0, 0, fb_w, fb_h, 0x000000);
         console_init();
+        } else if (strncmp(line, "exec ", 5) == 0) {
+          const char *path = line + 5;
+          console_printf("exec: %s\n", path);
+          int tid = kernel_spawn_elf_from_path(path);
+          if (tid < 0) console_puts("exec: failed to spawn\n");
+          else console_printf("exec: spawned pid=%d\n", tid);
       } else if (strcmp(line, "exit") == 0) {
         console_puts("shell: exiting\n");
         return; // Task exits cleanly

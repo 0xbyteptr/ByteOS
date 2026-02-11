@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 /* very small bump allocator with size header so we can implement realloc */
-static unsigned char heap[1024 * 1024]; /* 1 MiB */
+static unsigned char heap[8 * 1024 * 1024]; /* 8 MiB */
 static size_t heap_off = 0;
 
 /* header stored immediately before the returned pointer */

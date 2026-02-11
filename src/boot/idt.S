@@ -1,6 +1,7 @@
 .intel_syntax noprefix
 .global __load_idt_asm
 .global __isr_stub_80
+.global __isr_stub_14
 .global __isr_panic
 
 .section .rodata
@@ -69,6 +70,51 @@ __isr_stub_80:
 
     iretq
     .size __isr_stub_80, .-__isr_stub_80
+
+
+/* isr_stub_14: page fault handler */
+.type __isr_stub_14, @function
+__isr_stub_14:
+    /* save registers */
+    push rbp
+    push r15
+    push r14
+    push r13
+    push r12
+    push r11
+    push r10
+    push r9
+    push r8
+    push rsi
+    push rdi
+    push rdx
+    push rcx
+    push rbx
+    push rax
+
+    /* cr2 has the faulting address */
+    mov rdi, cr2
+    call page_fault_handler
+
+    /* restore */
+    pop rax
+    pop rbx
+    pop rcx
+    pop rdx
+    pop rdi
+    pop rsi
+    pop r8
+    pop r9
+    pop r10
+    pop r11
+    pop r12
+    pop r13
+    pop r14
+    pop r15
+    pop rbp
+
+    iretq
+    .size __isr_stub_14, .-__isr_stub_14
 
 
 /* __isr_panic: default handler used by early IDT entries; it halts the CPU */

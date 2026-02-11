@@ -22,7 +22,7 @@ SRCS = src/kernel/main.c \
        src/lib/stb_image_impl.c \
        src/lib/libc.c \
        src/mem/alloc.c \
-	src/mem/paging.c \
+	   src/mem/paging.c \
        src/assets/font.c \
        src/assets/bg.c \
        src/compat/compat.c \
@@ -47,6 +47,12 @@ SRCS = src/kernel/main.c \
 
 # object files live under $(BIN_DIR) mirroring src/ paths
 OBJS = $(patsubst src/%.c,$(BIN_DIR)/%.o,$(SRCS)) $(BIN_DIR)/boot/entry.o
+TOYBOX_OBJ = $(BIN_DIR)/assets/toybox.o
+
+ifeq ($(wildcard $(TOYBOX_BIN)),)
+else
+OBJS += $(TOYBOX_OBJ)
+endif
 
 ISO = byteos.iso
 ISO_DIR = isodir
@@ -100,6 +106,14 @@ $(BIN_DIR)/boot/idt_asm.o: src/boot/idt.S
 $(BIN_DIR)/multitasking/context.o: src/multitasking/context.S
 	@mkdir -p $(dir $@)
 	$(AS) $(CFLAGS) -c $< -o $@
+
+# embed toybox binary as an object when available
+$(BIN_DIR)/assets/toybox.o: $(TOYBOX_BIN)
+	@mkdir -p $(dir $@)
+	# Copy to a fixed temporary name so objcopy generates predictable symbol names
+	cp $(TOYBOX_BIN) $(BIN_DIR)/assets/toybox.tmp
+	$(OBJCOPY) -I binary -O elf64-x86-64 -B i386:x86-64 $(BIN_DIR)/assets/toybox.tmp $@
+	rm -f $(BIN_DIR)/assets/toybox.tmp
 
 # link into bin/kernel.elf
 $(BIN_DIR)/kernel.elf: linker.ld $(OBJS) $(BIN_DIR)/multitasking/context.o $(BIN_DIR)/boot/gdt_asm.o $(BIN_DIR)/boot/idt_asm.o

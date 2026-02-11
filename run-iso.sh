@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -eu
-ISO=byteos.iso
+ISO=out/byteos.iso
 if [ ! -f "$ISO" ]; then
   echo "ISO '$ISO' not found. Run 'make iso' first." >&2
   exit 1

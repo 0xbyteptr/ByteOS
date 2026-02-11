@@ -56,13 +56,12 @@ static void task_trampoline(void)
         serial_puts("task_trampoline: fn returned\n");
     } else {
         serial_puts("task_trampoline: fn is NULL, halting\n");
-        for(;;) asm volatile("hlt");
     }
 
     tasks[current].dead = 1;
     serial_puts("task_trampoline: marking task as dead\n");
-    scheduler_yield();
-    for(;;) asm volatile("hlt");
+    scheduler_yield(); // Oddaj kontrolę z powrotem do schedulera
+    for(;;) asm volatile("hlt"); // Powinno nigdy nie zostać osiągnięte
 }
 
 /* ======================================================= */
@@ -74,7 +73,7 @@ int scheduler_init(void)
         tasks[i].used = 0;
         tasks[i].dead = 0;
         tasks[i].sp = NULL;
-        tasks[i].stack = NULL;
+        // tasks[i].stack = NULL;
         tasks[i].kernel_stack = NULL;
     }
     current = -1;
@@ -114,7 +113,10 @@ int task_create(task_fn fn, void *arg)
                 return -1;
             }
 
-            uint64_t *sp = (uint64_t *)((uint8_t *)stack + STACK_SIZE);
+            uint8_t *stack_start = (uint8_t *)stack;
+            uint8_t *stack_end = stack_start + STACK_SIZE;
+
+            uint64_t *sp = (uint64_t *)stack_end;
             serial_puts("task_create: sp top -> ");
             serial_putdec((uint64_t)(uintptr_t)sp);
             serial_puts("\n");
@@ -125,45 +127,34 @@ int task_create(task_fn fn, void *arg)
             serial_putdec((uint64_t)(uintptr_t)sp);
             serial_puts("\n");
 
-            uint8_t *stack_start = (uint8_t *)stack;
-            uint8_t *stack_end = stack_start + STACK_SIZE;
-            uint8_t *min_sp = stack_start;
-            uint8_t *max_sp = stack_end - (9 * 8);
+            /* Reserve 9 qwords for initial registers/args */
+            sp -= 9;
 
-            if ((uint8_t *)sp < min_sp || (uint8_t *)sp > max_sp) {
+            /* Ensure stack does not underflow the allocated region */
+            if ((uint8_t *)sp < stack_start) {
                 serial_puts("task_create: stack pointer out of range!\n");
                 serial_puts("  stack_start=");
-                serial_putdec((uint64_t)(uintptr_t)stack_start);
+                serial_puthex64((uint64_t)(uintptr_t)stack_start);
                 serial_puts("  stack_end=");
-                serial_putdec((uint64_t)(uintptr_t)stack_end);
+                serial_puthex64((uint64_t)(uintptr_t)stack_end);
                 serial_puts("  sp=");
-                serial_putdec((uint64_t)(uintptr_t)sp);
+                serial_puthex64((uint64_t)(uintptr_t)sp);
                 kfree(stack);
                 kfree(kernel_stack);
                 return -1;
             }
 
-                uint64_t *sp_after = sp - 9;
-
-                /* debug: print sp and sp_after */
-                serial_puts("task_create: sp= "); serial_puthex64((uint64_t)(uintptr_t)sp);
-                serial_puts("task_create: sp_after= "); serial_puthex64((uint64_t)(uintptr_t)sp_after);
-
-                sp = sp_after; /* reserve 9 qwords */
-
-                /* debug: write test to sp[0] then report */
-                serial_puts("task_create: about to write stack frame\n");
-            sp[0] = 0; /* r15 */
-            sp[1] = 0; /* r14 */
-            sp[2] = 0; /* r13 */
-            sp[3] = 0; /* r12 */
-            sp[4] = 0; /* rbx */
-            sp[5] = 0; /* rbp */
+            sp[0] = 0; /* rbp */
+            sp[1] = 0; /* rbx */
+            sp[2] = 0; /* r12 */
+            sp[3] = 0; /* r13 */
+            sp[4] = 0; /* r14 */
+            sp[5] = 0; /* r15 */
             sp[6] = (uint64_t)task_trampoline; /* ret -> trampoline */
             sp[7] = (uint64_t)fn; /* trampoline will see this as fn */
             sp[8] = (uint64_t)arg; /* trampoline will see this as arg */
             serial_puts("task_create: prepared stack frame (sp=");
-            serial_putdec((uint64_t)(uintptr_t)sp);
+            serial_puthex64((uint64_t)(uintptr_t)sp);
             serial_puts(")\n");
 
             tasks[i].used = 1;
@@ -201,12 +192,14 @@ static int pick_next(void)
     return -1;
 }
 
+
 static int sched_lock = 0;
 void scheduler_lock(void)   { sched_lock++; }
 void scheduler_unlock(void) { if (sched_lock > 0) sched_lock--; }
 
 void scheduler_yield(void)
 {
+    serial_puts("scheduler_yield: entry\n");
     if (sched_lock > 0) {
         serial_puts("scheduler_yield: locked\n");
         return;
@@ -238,6 +231,7 @@ void scheduler_yield(void)
         uint64_t *dummy = NULL;
         scheduler_switch(&dummy, tasks[next].sp);
     }
+    serial_puts("scheduler_yield: switched\n");
 }
 
 int scheduler_get_tasks(struct scheduler_task_info *out, int max)
@@ -265,19 +259,21 @@ void scheduler_run(void)
 {
     serial_puts("scheduler: run start\n");
 
-    current = pick_next();
-    if (current < 0) {
-        serial_puts("scheduler: no tasks to run\n");
-        return;
+    while (1) {
+        current = pick_next();
+        if (current < 0) {
+            serial_puts("scheduler: no tasks to run\n");
+            break;
+        }
+
+        serial_puts("scheduler: switching to task ");
+        serial_putdec((uint64_t)current);
+        serial_puts("\n");
+
+        uint64_t *dummy = NULL;
+        scheduler_switch(&dummy, tasks[current].sp);
     }
 
-    serial_puts("scheduler: switching to task ");
-    serial_putdec((uint64_t)current);
-    serial_puts("\n");
-
-    uint64_t *dummy = NULL;
-    scheduler_switch(&dummy, tasks[current].sp);
-
-    for (;;)
-        asm volatile("hlt");
+    serial_puts("scheduler: no more tasks, halting\n");
+    for (;;) asm volatile("hlt");
 }

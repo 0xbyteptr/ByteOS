@@ -4,12 +4,12 @@
 .section .text
 scheduler_switch:
     /* Save callee-saved registers */
-    push r15
-    push r14
-    push r13
-    push r12
-    push rbx
     push rbp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
 
     /* Save the stack pointer */
     mov [rdi], rsp
@@ -18,11 +18,11 @@ scheduler_switch:
     mov rsp, rsi
 
     /* Restore callee-saved registers */
-    pop rbp
-    pop rbx
-    pop r12
-    pop r13
-    pop r14
     pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
 
     ret

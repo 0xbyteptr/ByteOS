@@ -38,4 +38,6 @@ char *strstr(const char *haystack, const char *needle);
 char *strdup(const char *s);
 void bzero(void *s, size_t n);
 
-#endif
+/* No need to define bool/true/false — provided by C23 */
+
+#endif /* LIBC_H */

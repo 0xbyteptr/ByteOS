@@ -20,6 +20,7 @@ static struct idt_ptr idtp;
 
 extern void __load_idt_asm(struct idt_ptr *p);
 extern void __isr_stub_80(void);
+extern void __isr_stub_14(void);
 extern void __isr_panic(void);
 
 static void set_idt_entry(int n, void *handler, uint16_t sel, uint8_t flags,
@@ -74,6 +75,8 @@ void idt_init(void) {
   serial_puts("idt: finished filling entries\n");
   /* install int 0x80 with DPL=3 (0xEE flags = present, DPL=3, type=0xE gate) */
   set_idt_entry(0x80, __isr_stub_80, 0x08, 0xEE, 0);
+  /* install page fault handler */
+  set_idt_entry(14, __isr_stub_14, 0x08, 0x8E, 0);
   idtp.limit = sizeof(idt) - 1;
   idtp.base = (uint64_t)(uintptr_t)&idt;
   serial_puts("idt: idtp.limit = ");
