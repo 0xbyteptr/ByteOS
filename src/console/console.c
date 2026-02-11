@@ -64,6 +64,5 @@ void console_printf(const char *fmt, ...) {
   va_end(ap);
   (void)n;
   /* also emit to serial for logs */
-  serial_puts(buf);
   console_puts(buf);
 }

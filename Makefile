@@ -3,10 +3,6 @@ LD = gcc
 AS = gcc
 OBJCOPY = objcopy
 
-# Optional local toybox build to provide small userland tools (xxd, sed, etc.)
-TOYBOX_BIN = toybox-0.8.9/toybox
-
-
 BIN_DIR = bin
 OUT_DIR = out
 
@@ -43,16 +39,14 @@ SRCS = src/kernel/main.c \
        src/boot/idt.c \
        src/boot/limine_reqs.c \
        src/serial/serial.c \
+       src/utils/log.c \
        $(DRIVER_SRCS)
 
 # object files live under $(BIN_DIR) mirroring src/ paths
 OBJS = $(patsubst src/%.c,$(BIN_DIR)/%.o,$(SRCS)) $(BIN_DIR)/boot/entry.o
-TOYBOX_OBJ = $(BIN_DIR)/assets/toybox.o
-
-ifeq ($(wildcard $(TOYBOX_BIN)),)
-else
-OBJS += $(TOYBOX_OBJ)
-endif
+BYTEBOX_BIN = apps/bytebox
+BYTEBOX_OBJ = $(BIN_DIR)/assets/bytebox.o
+OBJS += $(BYTEBOX_OBJ)
 
 ISO = byteos.iso
 ISO_DIR = isodir
@@ -65,12 +59,7 @@ all: $(BIN_DIR)/kernel.elf
 # generate C array from PSF font in assets/
 src/assets/font.c: assets/default8x16.psf
 	@echo "Generating C array for default8x16.psf"
-	@# Prefer local toybox xxd if available (toybox-0.8.9/toybox)
-	@if [ -x $(TOYBOX_BIN) ]; then \
-		$(TOYBOX_BIN) xxd -i $< | sed -E -e 's/unsigned char .*[dD]efault8x16_psf\[\]/extern const unsigned char assets_font_psf1[]/' -e 's/unsigned int .*[dD]efault8x16_psf_len/extern const unsigned int assets_font_psf1_len/' > $@; \
-	else \
-		xxd -i $< | sed -E -e 's/unsigned char .*[dD]efault8x16_psf\[\]/extern const unsigned char assets_font_psf1[]/' -e 's/unsigned int .*[dD]efault8x16_psf_len/extern const unsigned int assets_font_psf1_len/' > $@; \
-	fi
+	xxd -i $< | sed -E -e 's/unsigned char .*[dD]efault8x16_psf\[\]/extern const unsigned char assets_font_psf1[]/' -e 's/unsigned int .*[dD]efault8x16_psf_len/extern const unsigned int assets_font_psf1_len/' > $@; \
 
 fetch-stb:
 	@if [ ! -f src/lib/stb_image_stub.h ]; then \
@@ -83,11 +72,6 @@ $(BIN_DIR)/%.o: src/%.c
 	$(MAKE) fetch-stb
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
-
-# build local toybox if requested
-$(TOYBOX_BIN):
-	@echo "Building local toybox at $(TOYBOX_BIN)"
-	@$(MAKE) -C toybox-0.8.9 >/dev/null || true
 
 # assembly -> object in bin/
 $(BIN_DIR)/boot/entry.o: src/boot/entry.S
@@ -107,13 +91,16 @@ $(BIN_DIR)/multitasking/context.o: src/multitasking/context.S
 	@mkdir -p $(dir $@)
 	$(AS) $(CFLAGS) -c $< -o $@
 
-# embed toybox binary as an object when available
-$(BIN_DIR)/assets/toybox.o: $(TOYBOX_BIN)
+# build bytebox
+$(BYTEBOX_BIN): apps/bytebox.c
+	$(CC) $(CFLAGS) -static $< -o $@
+
+# embed bytebox binary as an object
+$(BYTEBOX_OBJ): $(BYTEBOX_BIN)
 	@mkdir -p $(dir $@)
-	# Copy to a fixed temporary name so objcopy generates predictable symbol names
-	cp $(TOYBOX_BIN) $(BIN_DIR)/assets/toybox.tmp
-	$(OBJCOPY) -I binary -O elf64-x86-64 -B i386:x86-64 $(BIN_DIR)/assets/toybox.tmp $@
-	rm -f $(BIN_DIR)/assets/toybox.tmp
+	cp $(BYTEBOX_BIN) $(BIN_DIR)/assets/bytebox.tmp
+	$(OBJCOPY) -I binary -O elf64-x86-64 -B i386:x86-64 $(BIN_DIR)/assets/bytebox.tmp $@
+	rm -f $(BIN_DIR)/assets/bytebox.tmp
 
 # link into bin/kernel.elf
 $(BIN_DIR)/kernel.elf: linker.ld $(OBJS) $(BIN_DIR)/multitasking/context.o $(BIN_DIR)/boot/gdt_asm.o $(BIN_DIR)/boot/idt_asm.o
@@ -129,14 +116,6 @@ iso: $(BIN_DIR)/kernel.elf
 	@cp limine.conf $(ISO_DIR)/
 	@cp limine/limine-bios.sys $(ISO_DIR)/
 	@cp limine/limine-bios-cd.bin $(ISO_DIR)/
-
-	@# Include local toybox binary in the ISO if available
-	@if [ -x $(TOYBOX_BIN) ]; then \
-		mkdir -p $(ISO_DIR)/bin; \
-		cp $(TOYBOX_BIN) $(ISO_DIR)/bin/toybox; \
-		cp $(TOYBOX_BIN) $(ISO_DIR)/bin/sh; \
-		echo "Included toybox in ISO at /bin/toybox and /bin/sh"; \
-	fi
 
 	xorriso -as mkisofs \
 	  -b limine-bios-cd.bin \

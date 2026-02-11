@@ -7,6 +7,7 @@
 #include "../lib/libc.h"
 #include "../lib/stb_image_stub.h"
 #include "../mem/alloc.h"
+#include "../mem/paging.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -17,6 +18,7 @@
 #include "multitasking/scheduler.h"
 #include "serial/serial.h"
 #include "shell/shell.h"
+#include "utils/log.h"
 
 // ────────────────────────────────────────────────
 // Forward declarations
@@ -128,26 +130,7 @@ void kernel_main(void) {
 
     serial_init();
     serial_puts("\n=== ByteOS kernel starting ===\n");
-
-    gdt_init();
-    serial_puts("GDT initialized\n");
-
-    early_idt_init();
-    serial_puts("Early IDT initialized\n");
-
-    tss_init();
-    serial_puts("TSS initialized\n");
-
-    idt_init();
-    serial_puts("Full IDT initialized\n");
-
-    asm volatile("sti");    // enable interrupts
-    serial_puts("Interrupts enabled\n");
-
-    drivers_init_all();
-    serial_puts("Drivers initialized\n");
-
-    // ── Framebuffer ────────────────────────────────
+    
     bool fb_ok = framebuffer_init();
     if (!fb_ok) {
         serial_puts("WARNING: framebuffer_init failed – no graphical output\n");
@@ -178,50 +161,71 @@ void kernel_main(void) {
                               framebuffer_get_width(),
                               framebuffer_get_height(),
                               0x1E2A38);
-        psf_draw_text(24, 24, "ByteOS", 0xFFFFFF);
+        printf("Welcome to ByteOS!\n");
     }
+    gdt_init();
+    log("GDT initialized");
+    early_idt_init();
+    log("Early IDT initialized");
+
+    tss_init();
+    log("TSS initialized");
+
+    paging_init();
+    log("Paging initialized");
+
+    idt_init();
+    log("Full IDT initialized");
+
+    asm volatile("sti");    // enable interrupts
+    log("Interrupts enabled");
+
+    drivers_init_all();
+    log("Drivers initialized");
+
+    // ── Framebuffer ────────────────────────────────
 
     // ── Scheduler ──────────────────────────────────
     if (scheduler_init() != 0) {
-        serial_puts("CRITICAL: scheduler_init failed\n");
+        log("CRITICAL: scheduler_init failed");
         panic("Cannot continue without scheduler");
     }
-    serial_puts("Scheduler initialized\n");
+    log("Scheduler initialized");
 
     // ── GUI (Mia) ──────────────────────────────────
     mia_init();
-    serial_puts("Mia GUI initialized\n");
+    log("Mia GUI initialized");
 
-    // ── Try to start shell from embedded toybox ────
-    serial_puts("Trying to start /bin/sh (embedded toybox)...\n");
+    // ── Try to start shell from embedded ByteBox ────
+    log("Trying to start /bin/sh...");
     int shell_tid = kernel_spawn_elf_from_path("/bin/sh");
     if (shell_tid >= 0) {
-        serial_puts("Shell task created successfully – TID = ");
+        log("Shell task created successfully – TID = ");
         serial_putdec((uint64_t)shell_tid);
-        serial_puts("\n");
+        log("\n");
     } else {
-        serial_puts("!!! Failed to spawn shell – error code = ");
+        log("!!! Failed to spawn shell – error code = ");
         serial_putdec((uint64_t)shell_tid);
-        serial_puts(" !!!\n");
+        log(" !!!\n");
     }
 
     // ── Debug / demo tasks ─────────────────────────
     int debug_tid = task_create(debug_console_task, NULL);
     if (debug_tid >= 0) {
-        serial_puts("Debug console task created – TID = ");
+        log("Debug console task created – TID = ");
         serial_putdec((uint64_t)debug_tid);
-        serial_puts("\n");
+        log("\n");
     }
 
     int mover_tid = task_create(mover, NULL);
     if (mover_tid >= 0) {
-        serial_puts("Mover window task created – TID = ");
+        log("Mover window task created – TID = ");
         serial_putdec((uint64_t)mover_tid);
-        serial_puts("\n");
+        log("\n");
     }
 
-    serial_puts("All initial tasks created – entering scheduler\n");
-    serial_puts("===========================================\n");
+    log("All initial tasks created – entering scheduler\n");
+    log("===========================================\n");
 
     // Hand over control to the scheduler
     scheduler_run();

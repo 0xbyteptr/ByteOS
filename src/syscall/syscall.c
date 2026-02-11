@@ -9,20 +9,11 @@
 #include "drivers/fat/fat.h"
 #include "drivers/ext/ext.h"
 
-// Embedded toybox binaries
-extern unsigned char _binary_toybox_start[];
-extern unsigned char _binary_toybox_end[];
-extern unsigned char _binary_toybox_0_8_9_toybox_start[];
-extern unsigned char _binary_toybox_0_8_9_toybox_end[];
-extern unsigned char _binary_bin_assets_toybox_tmp_start[];
-extern unsigned char _binary_bin_assets_toybox_tmp_end[];
-#include "multitasking/scheduler.h"
+// Embedded ByteBox binary
+extern unsigned char _binary_bin_assets_bytebox_tmp_start[];
+extern unsigned char _binary_bin_assets_bytebox_tmp_end[];
 
-/* Symbols from objcopy when embedding toybox binary */
-extern unsigned char _binary_toybox_start[] __attribute__((weak));
-extern unsigned char _binary_toybox_end[]   __attribute__((weak));
-extern unsigned char _binary_toybox_0_8_9_toybox_start[] __attribute__((weak));
-extern unsigned char _binary_toybox_0_8_9_toybox_end[]   __attribute__((weak));
+#include "multitasking/scheduler.h"
 
 /* Syscall numbers */
 #define SYS_READ  0
@@ -121,7 +112,6 @@ __attribute__((noreturn)) static void start_loaded_elf(void *arg) {
     __builtin_unreachable();
 }
 
-/* Read file — prefers embedded toybox, then ext2, then FAT */
 static int read_file_from_fs(const char *path, void **out_buf, size_t *out_len, int *is_embedded) {
     if (!path || !out_buf || !out_len || !is_embedded) return -1;
 
@@ -129,27 +119,16 @@ static int read_file_from_fs(const char *path, void **out_buf, size_t *out_len, 
     *out_len = 0;
     *is_embedded = 0;
 
-    unsigned char *tb_start = NULL;
-    unsigned char *tb_end   = NULL;
+    unsigned char *bb_start = _binary_bin_assets_bytebox_tmp_start;
+    unsigned char *bb_end   = _binary_bin_assets_bytebox_tmp_end;
 
-    if (_binary_toybox_start) {
-        tb_start = _binary_toybox_start;
-        tb_end   = _binary_toybox_end;
-    } else if (_binary_toybox_0_8_9_toybox_start) {
-        tb_start = _binary_toybox_0_8_9_toybox_start;
-        tb_end   = _binary_toybox_0_8_9_toybox_end;
-    } else if (_binary_bin_assets_toybox_tmp_start) {
-        tb_start = _binary_bin_assets_toybox_tmp_start;
-        tb_end   = _binary_bin_assets_toybox_tmp_end;
-    }
-
-    if (tb_start && (strcmp(path, "/bin/sh") == 0 || strcmp(path, "/bin/toybox") == 0)) {
-        serial_puts("read_file_from_fs: using embedded toybox for ");
+    if (bb_start && (strcmp(path, "/bin/sh") == 0 || strcmp(path, "/bin/bytebox") == 0)) {
+        serial_puts("read_file_from_fs: using embedded ByteBox for ");
         serial_puts(path);
         serial_puts("\n");
 
-        size_t sz = (size_t)(tb_end - tb_start);
-        *out_buf = (void *)tb_start;  // use directly, no copy
+        size_t sz = (size_t)(bb_end - bb_start);
+        *out_buf = (void *)bb_start;  // use directly, no copy
         *out_len = sz;
         *is_embedded = 1;   // mark as embedded, don't free
         return 0;
@@ -237,24 +216,20 @@ int spawn_elf_from_buf(void *buf, size_t len) {
     }
     serial_puts("spawn_elf_from_buf: kmalloc for image succeeded, raw = ");
     serial_puthex64((uint64_t)(uintptr_t)raw);
+    serial_puts("\n");
     uint8_t *base = (uint8_t *)(((uintptr_t)raw + 0xFFF) & ~0xFFFULL);
-
+    serial_puts("spawn_elf_from_buf: aligned base = ");
+    serial_puthex64((uint64_t)(uintptr_t)base);
+    serial_puts("\n");
     /* Zero the region */
+    serial_puts("spawn_elf_from_buf: about to memset ELF image\n");
+    // Only rely on bootloader mapping for kmalloc'd heap
+    serial_puts("spawn_elf_from_buf: skipping kernel region mapping, relying on bootloader\n");
     memset(base, 0, total_size);
-
     serial_puts("spawn_elf_from_buf: memset done\n");
-
     serial_puts("spawn_elf_from_buf: image allocated at ");
     serial_puthex64((uint64_t)base);
     serial_puts("\n");
-
-    if (paging_map_user_va(min_vaddr, (uint64_t)base, total_size) != 0) {
-        serial_puts("spawn_elf_from_buf: paging_map_user_va failed for image\n");
-        kfree(raw);
-        return -1;
-    }
-
-    serial_puts("spawn_elf_from_buf: paging done\n");
     for (int i = 0; i < eh->e_phnum; i++) {
         if (ph[i].p_type != 1) continue;
 
