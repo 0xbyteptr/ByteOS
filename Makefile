@@ -95,12 +95,24 @@ $(BIN_DIR)/multitasking/context.o: src/multitasking/context.S
 $(BYTEBOX_BIN): apps/bytebox.c
 	$(CC) $(CFLAGS) -static $< -o $@
 
+
 # embed bytebox binary as an object
 $(BYTEBOX_OBJ): $(BYTEBOX_BIN)
 	@mkdir -p $(dir $@)
 	cp $(BYTEBOX_BIN) $(BIN_DIR)/assets/bytebox.tmp
 	$(OBJCOPY) -I binary -O elf64-x86-64 -B i386:x86-64 $(BIN_DIR)/assets/bytebox.tmp $@
 	rm -f $(BIN_DIR)/assets/bytebox.tmp
+
+# embed toybox binary as an object
+TOYBOX_BIN = extern/toybox
+TOYBOX_OBJ = $(BIN_DIR)/assets/toybox.o
+OBJS += $(TOYBOX_OBJ)
+
+$(TOYBOX_OBJ): $(TOYBOX_BIN)
+	@mkdir -p $(dir $@)
+	cp $(TOYBOX_BIN) $(BIN_DIR)/assets/toybox.tmp
+	$(OBJCOPY) -I binary -O elf64-x86-64 -B i386:x86-64 $(BIN_DIR)/assets/toybox.tmp $@
+	rm -f $(BIN_DIR)/assets/toybox.tmp
 
 # link into bin/kernel.elf
 $(BIN_DIR)/kernel.elf: linker.ld $(OBJS) $(BIN_DIR)/multitasking/context.o $(BIN_DIR)/boot/gdt_asm.o $(BIN_DIR)/boot/idt_asm.o
@@ -116,6 +128,11 @@ iso: $(BIN_DIR)/kernel.elf
 	@cp limine.conf $(ISO_DIR)/
 	@cp limine/limine-bios.sys $(ISO_DIR)/
 	@cp limine/limine-bios-cd.bin $(ISO_DIR)/
+
+	# Ensure /bin directory exists in ISO and copy bytebox as /bin/sh and toybox as /bin/toybox
+	@mkdir -p $(ISO_DIR)/bin
+	@cp extern/toybox $(ISO_DIR)/bin/toybox
+	@cp extern/toybox $(ISO_DIR)/bin/sh
 
 	xorriso -as mkisofs \
 	  -b limine-bios-cd.bin \

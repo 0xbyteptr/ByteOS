@@ -3,7 +3,7 @@
 
 void log(const char* msg)
 {
-  serial_puts("LOG: ");
+  serial_puts("[LOG] ");
   serial_puts(msg);
   serial_puts("\n");
   // Check if msg is an integer string and print as integer if so
@@ -25,13 +25,13 @@ void log(const char* msg)
   if (is_int)
   {
     int val = atoi(msg);
-    printf("LOG: %d\n", val);
-    serial_puts("LOG: ");
+    printf("[LOG] %d\n", val);
+    serial_puts("[LOG] ");
     serial_putdec(val);
     serial_puts("\n");
   }
   else
   {
-    printf("LOG: %s\n", msg);
+    printf("[LOG] %s\n", msg);
   }
 }

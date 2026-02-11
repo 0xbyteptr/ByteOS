@@ -1,3 +1,9 @@
+#include <stdint.h>
+#include <stddef.h>
+
+// Prototypes for early paging helpers
+void paging_set_early_bump(uint64_t base, uint64_t size);
+void paging_mark_heap_mapped(void);
 #include "../assets/bg.h"
 #include "../assets/font.h"
 #include "../boot/limine.h"
@@ -199,10 +205,16 @@ void kernel_main(void)
 
   paging_init();
   serial_puts("Paging initialized\n");
-  paging_identity_map_kernel_sections();
-  serial_puts("paging_identity_map_kernel_sections: returned\n");
+  // Set up early bump allocator for page tables (use end of kernel .bss)
+  extern uint64_t _bss_end;
+  paging_set_early_bump((uint64_t)&_bss_end, 0x100000); // 1 MiB for early page tables
+  serial_puts("paging_set_early_bump: set\n");
   paging_identity_map_kernel_heap();
-  serial_puts("paging_identity_map_kernel_heap: returned\n");
+  serial_puts("[DEBUG] main: paging_identity_map_kernel_heap returned\n");
+  paging_mark_heap_mapped();
+  serial_puts("[DEBUG] main: paging_mark_heap_mapped called\n");
+  paging_identity_map_kernel_sections();
+  serial_puts("[DEBUG] main: paging_identity_map_kernel_sections returned\n");
   serial_puts("Paging setup complete\n");
 
   idt_init();
@@ -222,9 +234,9 @@ void kernel_main(void)
   }
   log("Scheduler initialized");
 
-  // ── GUI (Mia) ──────────────────────────────────
+  // ── GUI (MiaUI) ──────────────────────────────────
   mia_init();
-  log("Mia GUI initialized");
+  log("MiaUI GUI initialized");
 
   // ── Try to start shell from embedded ByteBox ────
   log("Trying to start /bin/sh...");

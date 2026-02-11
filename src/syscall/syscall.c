@@ -12,6 +12,9 @@
 // Embedded ByteBox binary
 extern unsigned char _binary_bin_assets_bytebox_tmp_start[];
 extern unsigned char _binary_bin_assets_bytebox_tmp_end[];
+// Embedded Toybox binary
+extern unsigned char _binary_bin_assets_toybox_tmp_start[];
+extern unsigned char _binary_bin_assets_toybox_tmp_end[];
 
 #include "multitasking/scheduler.h"
 
@@ -127,17 +130,29 @@ static int read_file_from_fs(const char* path, void** out_buf, size_t* out_len, 
 
   unsigned char* bb_start = _binary_bin_assets_bytebox_tmp_start;
   unsigned char* bb_end   = _binary_bin_assets_bytebox_tmp_end;
+  unsigned char* tb_start = _binary_bin_assets_toybox_tmp_start;
+  unsigned char* tb_end   = _binary_bin_assets_toybox_tmp_end;
 
   if (bb_start && (strcmp(path, "/bin/sh") == 0 || strcmp(path, "/bin/bytebox") == 0))
   {
     serial_puts("read_file_from_fs: using embedded ByteBox for ");
     serial_puts(path);
     serial_puts("\n");
-
     size_t sz    = (size_t) (bb_end - bb_start);
     *out_buf     = (void*) bb_start;  // use directly, no copy
     *out_len     = sz;
     *is_embedded = 1;  // mark as embedded, don't free
+    return 0;
+  }
+  if (tb_start && strcmp(path, "/bin/toybox") == 0)
+  {
+    serial_puts("read_file_from_fs: using embedded Toybox for ");
+    serial_puts(path);
+    serial_puts("\n");
+    size_t sz    = (size_t) (tb_end - tb_start);
+    *out_buf     = (void*) tb_start;
+    *out_len     = sz;
+    *is_embedded = 1;
     return 0;
   }
 
