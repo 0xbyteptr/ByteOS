@@ -1,0 +1,26 @@
+# Wersja clang-format
+BasedOnStyle: LLVM
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+ColumnLimit: 100
+BreakBeforeBraces: Allman
+AllowShortFunctionsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: false
+SpacesBeforeTrailingComments: 2
+SpaceAfterCStyleCast: true
+SpaceAfterTemplateKeyword: true
+SpaceBeforeParens: ControlStatements # np. if( x ) { ... }
+SpaceBeforeAssignmentOperators: true
+Cpp11BracedListStyle: true
+DerivePointerAlignment: false
+PointerAlignment: Left # int* ptr;
+AlignConsecutiveAssignments: true
+AlignConsecutiveDeclarations: true
+AlignAfterOpenBracket: Align
+BinPackParameters: false
+BinPackArguments: false
+IndentCaseLabels: true
+ReflowComments: true
+SortIncludes: true
+IncludeBlocks: Preserve

@@ -13,17 +13,19 @@
 /* Simple realloc implementation that uses kmalloc/kfree and copies the
    smaller of old/new sizes. This is sufficient for stb's use (expanding
    buffers during decoding). */
-static void *stbi_realloc_sized(void *p, size_t oldsz, size_t newsz) {
+static void* stbi_realloc_sized(void* p, size_t oldsz, size_t newsz)
+{
   if (p == NULL)
     return kmalloc(newsz);
-  void *n = kmalloc(newsz);
-  if (!n) {
+  void* n = kmalloc(newsz);
+  if (!n)
+  {
     kfree(p);
     return NULL;
   }
-  size_t copy = oldsz < newsz ? oldsz : newsz;
-  unsigned char *dn = (unsigned char *)n;
-  unsigned char *dp = (unsigned char *)p;
+  size_t         copy = oldsz < newsz ? oldsz : newsz;
+  unsigned char* dn   = (unsigned char*) n;
+  unsigned char* dp   = (unsigned char*) p;
   for (size_t i = 0; i < copy; ++i)
     dn[i] = dp[i];
   kfree(p);

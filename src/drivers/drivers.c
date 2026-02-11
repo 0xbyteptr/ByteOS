@@ -10,7 +10,8 @@ int mouse_init(void);
 int fat_init(void);
 int ext_init(void);
 
-void drivers_init_all(void) {
+void drivers_init_all(void)
+{
   serial_puts("drivers: init all\n");
   if (ata_init() == 0)
     serial_puts("drivers: ata ok\n");
