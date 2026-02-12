@@ -2,3 +2,7 @@ bin/
 out/
 generated/
 *.o
+*.iso
+/build
+*.elf
+isodir/
